@@ -1,4 +1,5 @@
 import os
+import time
 
 from flask import (
     Flask,
@@ -21,6 +22,11 @@ from google import genai
 
 load_dotenv()
 
+
+# ============================================================
+# ENVIRONMENT VARIABLES
+# ============================================================
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -28,29 +34,22 @@ FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
 
 
 # ============================================================
-# CHECK ENVIRONMENT VARIABLES
+# CHECK REQUIRED ENVIRONMENT VARIABLES
 # ============================================================
 
 if not SUPABASE_URL:
     raise RuntimeError(
-        "SUPABASE_URL is missing from your .env file."
+        "SUPABASE_URL is missing from your environment variables."
     )
-
-app = Flask(__name__)
-app.secret_key = FLASK_SECRET_KEY
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_TYPE'] = 'filesystem'
-
-
 
 if not SUPABASE_PUBLISHABLE_KEY:
     raise RuntimeError(
-        "SUPABASE_PUBLISHABLE_KEY is missing from your .env file."
+        "SUPABASE_PUBLISHABLE_KEY is missing from your environment variables."
     )
 
 if not FLASK_SECRET_KEY:
     raise RuntimeError(
-        "FLASK_SECRET_KEY is missing from your .env file."
+        "FLASK_SECRET_KEY is missing from your environment variables."
     )
 
 
@@ -59,9 +58,11 @@ if not FLASK_SECRET_KEY:
 # ============================================================
 
 app = Flask(__name__)
+
 app.secret_key = FLASK_SECRET_KEY
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_TYPE'] = 'filesystem'
+
+app.config["SESSION_PERMANENT"] = False
+app.config["SESSION_TYPE"] = "filesystem"
 
 
 # ============================================================
@@ -75,8 +76,15 @@ if GEMINI_API_KEY:
         gemini_client = genai.Client(
             api_key=GEMINI_API_KEY
         )
+
+        print("Gemini client initialized successfully.")
+
     except Exception as e:
-        print(f"Warning: Could not initialize Gemini client: {e}")
+
+        print(
+            "WARNING: Could not initialize Gemini client:",
+            repr(e)
+        )
 
 
 # ============================================================
@@ -140,7 +148,12 @@ def current_profile(client: Client):
         return result.data
 
     except Exception as e:
-        print(f"Error fetching profile: {e}")
+
+        print(
+            "Error fetching profile:",
+            repr(e)
+        )
+
         return None
 
 
@@ -148,10 +161,15 @@ def current_profile(client: Client):
 # CREATE USER PROFILE
 # ============================================================
 
-def create_user_profile(client: Client, user_id: str, email: str, full_name: str):
-    """Create a profile record for a new user"""
-    
+def create_user_profile(
+    client: Client,
+    user_id: str,
+    email: str,
+    full_name: str
+):
+
     try:
+
         client.table("profiles").insert(
             {
                 "id": user_id,
@@ -161,12 +179,20 @@ def create_user_profile(client: Client, user_id: str, email: str, full_name: str
                 "is_verified": False
             }
         ).execute()
-        
-        print(f"Profile created for user: {user_id}")
+
+        print(
+            f"Profile created for user: {user_id}"
+        )
+
         return True
-        
+
     except Exception as e:
-        print(f"Error creating profile: {e}")
+
+        print(
+            "Error creating profile:",
+            repr(e)
+        )
+
         return False
 
 
@@ -212,6 +238,11 @@ def home():
 
     except Exception as e:
 
+        print(
+            "HOME ERROR:",
+            repr(e)
+        )
+
         error = str(e)
 
     return render_template(
@@ -250,7 +281,9 @@ def signup():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     if len(password) < 6:
 
@@ -259,7 +292,9 @@ def signup():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     if not full_name:
 
@@ -291,20 +326,29 @@ def signup():
                 "error"
             )
 
-            return redirect(url_for("home"))
+            return redirect(
+                url_for("home")
+            )
 
-        # Create profile immediately after signup
         user_id = result.user.id
-        
-        # Authenticate client with the new user's token if available
-        if result.session:
-            client.postgrest.auth(result.session.access_token)
-        
-        # Create the profile
-        if not create_user_profile(client, user_id, email, full_name):
-            print(f"Warning: Profile creation failed for {user_id}, but account exists")
 
-        # Email confirmation enabled
+        if result.session:
+
+            client.postgrest.auth(
+                result.session.access_token
+            )
+
+        if not create_user_profile(
+            client,
+            user_id,
+            email,
+            full_name
+        ):
+
+            print(
+                f"Warning: Profile creation failed for {user_id}"
+            )
+
         if result.session is None:
 
             flash(
@@ -312,9 +356,10 @@ def signup():
                 "info"
             )
 
-            return redirect(url_for("home"))
+            return redirect(
+                url_for("home")
+            )
 
-        # No email confirmation needed - log in immediately
         start_session(result)
 
         flash(
@@ -322,18 +367,25 @@ def signup():
             "success"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     except Exception as e:
 
-        print("SIGNUP ERROR:", repr(e))
+        print(
+            "SIGNUP ERROR:",
+            repr(e)
+        )
 
         flash(
             f"Sign up failed: {str(e)[:100]}",
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
 
 # ============================================================
@@ -360,7 +412,9 @@ def login():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     try:
 
@@ -383,7 +437,9 @@ def login():
                 "error"
             )
 
-            return redirect(url_for("home"))
+            return redirect(
+                url_for("home")
+            )
 
         start_session(result)
 
@@ -392,18 +448,25 @@ def login():
             "success"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     except Exception as e:
 
-        print("LOGIN ERROR:", repr(e))
+        print(
+            "LOGIN ERROR:",
+            repr(e)
+        )
 
         flash(
             f"Login failed: {str(e)[:100]}",
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
 
 # ============================================================
@@ -427,8 +490,8 @@ def start_session(auth_result):
     session["email"] = (
         auth_result.user.email
     )
-    
-    session.permanent = True
+
+    session.permanent = False
 
 
 # ============================================================
@@ -448,7 +511,9 @@ def logout():
         "success"
     )
 
-    return redirect(url_for("home"))
+    return redirect(
+        url_for("home")
+    )
 
 
 # ============================================================
@@ -468,7 +533,9 @@ def post_problem():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     title = request.form.get(
         "title",
@@ -492,7 +559,9 @@ def post_problem():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     client = get_client()
 
@@ -524,7 +593,9 @@ def post_problem():
             "error"
         )
 
-    return redirect(url_for("home"))
+    return redirect(
+        url_for("home")
+    )
 
 
 # ============================================================
@@ -575,6 +646,11 @@ def problem_detail(problem_id):
 
     except Exception as e:
 
+        print(
+            "PROBLEM DETAIL ERROR:",
+            repr(e)
+        )
+
         error = str(e)
 
     return render_template(
@@ -614,9 +690,7 @@ def reply(problem_id):
             )
         )
 
-    if not profile.get(
-        "is_verified"
-    ):
+    if not profile.get("is_verified"):
 
         flash(
             "Only verified techs can reply.",
@@ -704,7 +778,9 @@ def admin():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     if profile.get("role") != "admin":
 
@@ -713,7 +789,9 @@ def admin():
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     techs = []
     error = None
@@ -732,6 +810,11 @@ def admin():
         techs = result.data or []
 
     except Exception as e:
+
+        print(
+            "ADMIN ERROR:",
+            repr(e)
+        )
 
         error = str(e)
 
@@ -763,7 +846,9 @@ def verify_tech(tech_id):
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     if profile.get("role") != "admin":
 
@@ -772,7 +857,9 @@ def verify_tech(tech_id):
             "error"
         )
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
 
     try:
 
@@ -793,6 +880,11 @@ def verify_tech(tech_id):
         )
 
     except Exception as e:
+
+        print(
+            "VERIFY TECH ERROR:",
+            repr(e)
+        )
 
         flash(
             f"Could not verify tech: {str(e)[:100]}",
@@ -844,7 +936,7 @@ def ask_ai():
     elif not GEMINI_API_KEY:
 
         error = (
-            "GEMINI_API_KEY is missing from .env."
+            "GEMINI_API_KEY is missing from the environment variables."
         )
 
     # --------------------------------------------------------
@@ -865,30 +957,74 @@ def ask_ai():
 
         try:
 
-            response = (
-                gemini_client
-                .models
-                .generate_content(
-                    model="gemini-1.5-flash",
-                    contents=(
-                        "You are MarvTec AI Solver, "
-                        "a technical problem-solving assistant.\n\n"
+            ai_prompt = (
+                "You are MarvTec AI Solver, "
+                "a technical problem-solving assistant.\n\n"
 
-                        f"Technical category: {category}\n\n"
+                f"Technical category: {category}\n\n"
 
-                        f"User's problem:\n{prompt}\n\n"
+                f"User's problem:\n{prompt}\n\n"
 
-                        "Give a clear and practical solution. "
-                        "Break the solution into numbered steps. "
-                        "Explain technical terms when necessary. "
-                        "Do not invent facts. "
-                        "If more information is needed, "
-                        "clearly state what information is missing."
-                    )
-                )
+                "Give a clear and practical solution. "
+                "Break the solution into numbered steps. "
+                "Explain technical terms when necessary. "
+                "Do not invent facts. "
+                "If more information is needed, "
+                "clearly state what information is missing."
             )
 
-            answer = response.text
+            # Try the request up to 3 times.
+            # This helps with temporary 503 overload errors.
+            max_attempts = 3
+
+            response = None
+
+            for attempt in range(1, max_attempts + 1):
+
+                try:
+
+                    response = (
+                        gemini_client
+                        .models
+                        .generate_content(
+                            model="gemini-3.7-flash",
+                            contents=ai_prompt
+                        )
+                    )
+
+                    break
+
+                except Exception as gemini_error:
+
+                    error_text = str(
+                        gemini_error
+                    ).lower()
+
+                    print(
+                        f"GEMINI ATTEMPT {attempt} ERROR:",
+                        repr(gemini_error)
+                    )
+
+                    # Retry temporary availability problems.
+                    if (
+                        "503" in error_text
+                        or "unavailable" in error_text
+                        or "high demand" in error_text
+                    ):
+
+                        if attempt < max_attempts:
+
+                            time.sleep(
+                                2 * attempt
+                            )
+
+                            continue
+
+                    raise
+
+            if response:
+
+                answer = response.text
 
             if not answer:
 
@@ -904,13 +1040,33 @@ def ask_ai():
                 repr(e)
             )
 
-            error = (
-                f"AI request failed: {str(e)[:100]}"
-            )
+            error_text = str(e)
 
-    # --------------------------------------------------------
+            if "404" in error_text:
+
+                error = (
+                    "The Gemini model was not found. "
+                    "The app is configured for gemini-3.7-flash. "
+                    "Please make sure Render has deployed the latest code."
+                )
+
+            elif "503" in error_text:
+
+                error = (
+                    "Gemini is temporarily unavailable "
+                    "because the service is busy. "
+                    "Please try again shortly."
+                )
+
+            else:
+
+                error = (
+                    f"AI request failed: {error_text[:150]}"
+                )
+
+    # ========================================================
     # LOAD PROBLEMS
-    # --------------------------------------------------------
+    # ========================================================
 
     client = get_client()
 
@@ -934,9 +1090,16 @@ def ask_ai():
             result.data or []
         )
 
-    except Exception:
+    except Exception as e:
 
-        pass
+        print(
+            "LOAD PROBLEMS ERROR:",
+            repr(e)
+        )
+
+    # ========================================================
+    # RETURN PAGE
+    # ========================================================
 
     return render_template(
         "index.html",
@@ -953,9 +1116,15 @@ def ask_ai():
 
 if __name__ == "__main__":
 
+    port = int(
+        os.environ.get(
+            "PORT",
+            3000
+        )
+    )
+
     app.run(
-        debug=True,
+        debug=False,
         host="0.0.0.0",
-        port=3000,
-        use_reloader=False
+        port=port
     )
