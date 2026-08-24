@@ -72,12 +72,16 @@ app.config["SESSION_TYPE"] = "filesystem"
 gemini_client = None
 
 if GEMINI_API_KEY:
+
     try:
+
         gemini_client = genai.Client(
             api_key=GEMINI_API_KEY
         )
 
-        print("Gemini client initialized successfully.")
+        print(
+            "Gemini client initialized successfully."
+        )
 
     except Exception as e:
 
@@ -98,10 +102,65 @@ def get_client() -> Client:
         SUPABASE_PUBLISHABLE_KEY
     )
 
-    token = session.get("access_token")
+    access_token = session.get(
+        "access_token"
+    )
 
-    if token:
-        client.postgrest.auth(token)
+    refresh_token = session.get(
+        "refresh_token"
+    )
+
+    # --------------------------------------------------------
+    # Restore / refresh Supabase session
+    # --------------------------------------------------------
+
+    if access_token and refresh_token:
+
+        try:
+
+            auth_response = client.auth.set_session(
+                access_token,
+                refresh_token
+            )
+
+            if auth_response.session:
+
+                new_access_token = (
+                    auth_response.session.access_token
+                )
+
+                new_refresh_token = (
+                    auth_response.session.refresh_token
+                )
+
+                session["access_token"] = (
+                    new_access_token
+                )
+
+                session["refresh_token"] = (
+                    new_refresh_token
+                )
+
+                client.postgrest.auth(
+                    new_access_token
+                )
+
+        except Exception as e:
+
+            print(
+                "SUPABASE SESSION ERROR:",
+                repr(e)
+            )
+
+            # Session can no longer be used.
+            # Force a fresh login.
+            session.clear()
+
+    elif access_token:
+
+        client.postgrest.auth(
+            access_token
+        )
 
     return client
 
@@ -112,9 +171,12 @@ def get_client() -> Client:
 
 def current_user():
 
-    user_id = session.get("user_id")
+    user_id = session.get(
+        "user_id"
+    )
 
     if not user_id:
+
         return None
 
     return {
@@ -127,11 +189,16 @@ def current_user():
 # CURRENT PROFILE
 # ============================================================
 
-def current_profile(client: Client):
+def current_profile(
+    client: Client
+):
 
-    user_id = session.get("user_id")
+    user_id = session.get(
+        "user_id"
+    )
 
     if not user_id:
+
         return None
 
     try:
@@ -170,7 +237,9 @@ def create_user_profile(
 
     try:
 
-        client.table("profiles").insert(
+        client.table(
+            "profiles"
+        ).insert(
             {
                 "id": user_id,
                 "email": email,
@@ -256,7 +325,10 @@ def home():
 # SIGN UP
 # ============================================================
 
-@app.route("/signup", methods=["POST"])
+@app.route(
+    "/signup",
+    methods=["POST"]
+)
 def signup():
 
     email = request.form.get(
@@ -360,7 +432,9 @@ def signup():
                 url_for("home")
             )
 
-        start_session(result)
+        start_session(
+            result
+        )
 
         flash(
             "Welcome to MarvTec AI Solver!",
@@ -392,7 +466,10 @@ def signup():
 # LOGIN
 # ============================================================
 
-@app.route("/login", methods=["POST"])
+@app.route(
+    "/login",
+    methods=["POST"]
+)
 def login():
 
     email = request.form.get(
@@ -441,7 +518,9 @@ def login():
                 url_for("home")
             )
 
-        start_session(result)
+        start_session(
+            result
+        )
 
         flash(
             "Login successful!",
@@ -473,7 +552,9 @@ def login():
 # START SESSION
 # ============================================================
 
-def start_session(auth_result):
+def start_session(
+    auth_result
+):
 
     session["access_token"] = (
         auth_result.session.access_token
@@ -567,7 +648,9 @@ def post_problem():
 
     try:
 
-        client.table("problems").insert(
+        client.table(
+            "problems"
+        ).insert(
             {
                 "title": title,
                 "description": description,
@@ -605,13 +688,17 @@ def post_problem():
 @app.route(
     "/problem/<problem_id>"
 )
-def problem_detail(problem_id):
+def problem_detail(
+    problem_id
+):
 
     client = get_client()
 
     problem = None
     responses = []
-    profile = current_profile(client)
+    profile = current_profile(
+        client
+    )
     error = None
 
     try:
@@ -620,7 +707,10 @@ def problem_detail(problem_id):
             client
             .table("problems")
             .select("*")
-            .eq("id", problem_id)
+            .eq(
+                "id",
+                problem_id
+            )
             .single()
             .execute()
         )
@@ -670,11 +760,15 @@ def problem_detail(problem_id):
     "/problem/<problem_id>/reply",
     methods=["POST"]
 )
-def reply(problem_id):
+def reply(
+    problem_id
+):
 
     client = get_client()
 
-    profile = current_profile(client)
+    profile = current_profile(
+        client
+    )
 
     if not profile:
 
@@ -690,7 +784,9 @@ def reply(problem_id):
             )
         )
 
-    if not profile.get("is_verified"):
+    if not profile.get(
+        "is_verified"
+    ):
 
         flash(
             "Only verified techs can reply.",
@@ -769,7 +865,9 @@ def admin():
 
     client = get_client()
 
-    profile = current_profile(client)
+    profile = current_profile(
+        client
+    )
 
     if not profile:
 
@@ -782,7 +880,9 @@ def admin():
             url_for("home")
         )
 
-    if profile.get("role") != "admin":
+    if profile.get(
+        "role"
+    ) != "admin":
 
         flash(
             "Admins only.",
@@ -802,8 +902,14 @@ def admin():
             client
             .table("profiles")
             .select("*")
-            .eq("role", "tech")
-            .eq("is_verified", False)
+            .eq(
+                "role",
+                "tech"
+            )
+            .eq(
+                "is_verified",
+                False
+            )
             .execute()
         )
 
@@ -833,11 +939,15 @@ def admin():
     "/admin/verify/<tech_id>",
     methods=["POST"]
 )
-def verify_tech(tech_id):
+def verify_tech(
+    tech_id
+):
 
     client = get_client()
 
-    profile = current_profile(client)
+    profile = current_profile(
+        client
+    )
 
     if not profile:
 
@@ -850,7 +960,9 @@ def verify_tech(tech_id):
             url_for("home")
         )
 
-    if profile.get("role") != "admin":
+    if profile.get(
+        "role"
+    ) != "admin":
 
         flash(
             "Admins only.",
@@ -920,7 +1032,7 @@ def ask_ai():
     error = None
 
     # --------------------------------------------------------
-    # CHECK USER PROMPT
+    # CHECK PROMPT
     # --------------------------------------------------------
 
     if not prompt:
@@ -930,7 +1042,7 @@ def ask_ai():
         )
 
     # --------------------------------------------------------
-    # CHECK GEMINI KEY
+    # CHECK API KEY
     # --------------------------------------------------------
 
     elif not GEMINI_API_KEY:
@@ -940,13 +1052,14 @@ def ask_ai():
         )
 
     # --------------------------------------------------------
-    # CHECK GEMINI CLIENT
+    # CHECK CLIENT
     # --------------------------------------------------------
 
     elif not gemini_client:
 
         error = (
-            "AI client not initialized. Check GEMINI_API_KEY."
+            "AI client was not initialized. "
+            "Please check GEMINI_API_KEY."
         )
 
     # --------------------------------------------------------
@@ -973,15 +1086,20 @@ def ask_ai():
                 "clearly state what information is missing."
             )
 
-            # Try the request up to 3 times.
-            # This helps with temporary 503 overload errors.
-            max_attempts = 3
-
             response = None
 
-            for attempt in range(1, max_attempts + 1):
+            max_attempts = 3
+
+            for attempt in range(
+                1,
+                max_attempts + 1
+            ):
 
                 try:
+
+                    print(
+                        f"GEMINI REQUEST ATTEMPT {attempt}"
+                    )
 
                     response = (
                         gemini_client
@@ -1005,20 +1123,33 @@ def ask_ai():
                         repr(gemini_error)
                     )
 
-                    # Retry temporary availability problems.
-                    if (
+                    temporary_error = (
                         "503" in error_text
                         or "unavailable" in error_text
                         or "high demand" in error_text
+                        or "429" in error_text
+                        or "rate limit" in error_text
+                    )
+
+                    if (
+                        temporary_error
+                        and attempt < max_attempts
                     ):
 
-                        if attempt < max_attempts:
+                        wait_time = (
+                            5 * (2 ** (attempt - 1))
+                        )
 
-                            time.sleep(
-                                2 * attempt
-                            )
+                        print(
+                            f"Gemini temporarily unavailable. "
+                            f"Retrying in {wait_time} seconds..."
+                        )
 
-                            continue
+                        time.sleep(
+                            wait_time
+                        )
+
+                        continue
 
                     raise
 
@@ -1046,22 +1177,29 @@ def ask_ai():
 
                 error = (
                     "The Gemini model was not found. "
-                    "The app is configured for gemini-3.7-flash. "
-                    "Please make sure Render has deployed the latest code."
+                    "Please make sure Render is running "
+                    "the latest version of appy.py."
                 )
 
             elif "503" in error_text:
 
                 error = (
-                    "Gemini is temporarily unavailable "
-                    "because the service is busy. "
-                    "Please try again shortly."
+                    "Gemini is temporarily busy. "
+                    "Please try again in a few moments."
+                )
+
+            elif "429" in error_text:
+
+                error = (
+                    "Gemini request limit reached. "
+                    "Please wait a little and try again."
                 )
 
             else:
 
                 error = (
-                    f"AI request failed: {error_text[:150]}"
+                    f"AI request failed: "
+                    f"{error_text[:150]}"
                 )
 
     # ========================================================
