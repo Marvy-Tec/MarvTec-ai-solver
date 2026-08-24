@@ -1,6 +1,4 @@
 import os
-import base64
-import json
 
 from flask import (
     Flask,
@@ -13,15 +11,21 @@ from flask import (
 )
 
 from supabase import create_client, Client
-from dotenv import load_dotenv
 from groq import Groq
+from dotenv import load_dotenv
+
 
 
 # ============================================================
-# LOAD ENVIRONMENT VARIABLES
+# LOAD .ENV
 # ============================================================
 
 load_dotenv()
+
+
+# ============================================================
+# ENVIRONMENT VARIABLES
+# ============================================================
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
@@ -30,7 +34,7 @@ FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
 
 
 # ============================================================
-# CHECK ENVIRONMENT VARIABLES
+# CHECK REQUIRED ENVIRONMENT VARIABLES
 # ============================================================
 
 if not SUPABASE_URL:
@@ -48,11 +52,6 @@ if not FLASK_SECRET_KEY:
         "FLASK_SECRET_KEY is missing from your environment variables."
     )
 
-if not GROQ_API_KEY:
-    print(
-        "WARNING: GROQ_API_KEY is missing from environment variables."
-    )
-
 
 # ============================================================
 # FLASK APP
@@ -63,30 +62,26 @@ app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
 app.config["SESSION_PERMANENT"] = False
+app.config["SESSION_TYPE"] = "filesystem"
 
 
 # ============================================================
-# GROQ CLIENT
+# GROQ
 # ============================================================
 
 groq_client = None
 
 if GROQ_API_KEY:
-
     try:
-
         groq_client = Groq(
             api_key=GROQ_API_KEY
         )
 
-        print(
-            "Groq client initialized successfully."
-        )
+        print("Groq client initialized successfully.")
 
     except Exception as e:
-
         print(
-            "GROQ INITIALIZATION ERROR:",
+            "WARNING: Could not initialize Groq client:",
             repr(e)
         )
 
@@ -95,150 +90,56 @@ if GROQ_API_KEY:
 # SUPABASE CLIENT
 # ============================================================
 
-def create_supabase_client():
+def get_client() -> Client:
 
-    return create_client(
+    client = create_client(
         SUPABASE_URL,
         SUPABASE_PUBLISHABLE_KEY
     )
 
+    access_token = session.get("access_token")
+    refresh_token = session.get("refresh_token")
 
-# ============================================================
-# CHECK JWT EXPIRATION
-# ============================================================
+    if access_token and refresh_token:
 
-def token_is_expired(token):
+        try:
 
-    try:
-
-        parts = token.split(".")
-
-        if len(parts) != 3:
-            return True
-
-        payload = parts[1]
-
-        payload += "=" * (
-            4 - len(payload) % 4
-        )
-
-        decoded = base64.urlsafe_b64decode(
-            payload
-        )
-
-        data = json.loads(
-            decoded.decode("utf-8")
-        )
-
-        exp = data.get("exp")
-
-        if not exp:
-            return True
-
-        import time
-
-        return time.time() >= exp
-
-    except Exception:
-
-        return True
-
-
-# ============================================================
-# REFRESH SUPABASE SESSION
-# ============================================================
-
-def refresh_supabase_session():
-
-    refresh_token = session.get(
-        "refresh_token"
-    )
-
-    if not refresh_token:
-
-        return False
-
-    try:
-
-        client = create_supabase_client()
-
-        result = client.auth.refresh_session(
-            refresh_token
-        )
-
-        if not result.session:
-
-            return False
-
-        session["access_token"] = (
-            result.session.access_token
-        )
-
-        session["refresh_token"] = (
-            result.session.refresh_token
-        )
-
-        session["user_id"] = (
-            result.user.id
-        )
-
-        session["email"] = (
-            result.user.email
-        )
-
-        print(
-            "Supabase session refreshed successfully."
-        )
-
-        return True
-
-    except Exception as e:
-
-        print(
-            "SUPABASE REFRESH ERROR:",
-            repr(e)
-        )
-
-        session.clear()
-
-        return False
-
-
-# ============================================================
-# SUPABASE CLIENT WITH CURRENT USER TOKEN
-# ============================================================
-
-def get_client() -> Client:
-
-    client = create_supabase_client()
-
-    token = session.get(
-        "access_token"
-    )
-
-    if token:
-
-        if token_is_expired(token):
-
-            print(
-                "Supabase access token expired. Refreshing..."
+            auth_response = client.auth.set_session(
+                access_token,
+                refresh_token
             )
 
-            if refresh_supabase_session():
+            if auth_response.session:
 
-                token = session.get(
-                    "access_token"
+                new_access_token = (
+                    auth_response.session.access_token
                 )
 
-            else:
+                new_refresh_token = (
+                    auth_response.session.refresh_token
+                )
 
-                token = None
+                session["access_token"] = new_access_token
+                session["refresh_token"] = new_refresh_token
 
-        if token:
+                client.postgrest.auth(
+                    new_access_token
+                )
 
-            client.postgrest.auth(
-                token
+        except Exception as e:
+
+            print(
+                "SUPABASE SESSION ERROR:",
+                repr(e)
             )
+
+            session.clear()
+
+    elif access_token:
+
+        client.postgrest.auth(
+            access_token
+        )
 
     return client
 
@@ -249,9 +150,7 @@ def get_client() -> Client:
 
 def current_user():
 
-    user_id = session.get(
-        "user_id"
-    )
+    user_id = session.get("user_id")
 
     if not user_id:
         return None
@@ -268,9 +167,7 @@ def current_user():
 
 def current_profile(client: Client):
 
-    user_id = session.get(
-        "user_id"
-    )
+    user_id = session.get("user_id")
 
     if not user_id:
         return None
@@ -281,10 +178,7 @@ def current_profile(client: Client):
             client
             .table("profiles")
             .select("*")
-            .eq(
-                "id",
-                user_id
-            )
+            .eq("id", user_id)
             .single()
             .execute()
         )
@@ -294,7 +188,7 @@ def current_profile(client: Client):
     except Exception as e:
 
         print(
-            "PROFILE ERROR:",
+            "Error fetching profile:",
             repr(e)
         )
 
@@ -314,9 +208,7 @@ def create_user_profile(
 
     try:
 
-        client.table(
-            "profiles"
-        ).insert(
+        client.table("profiles").insert(
             {
                 "id": user_id,
                 "email": email,
@@ -327,7 +219,7 @@ def create_user_profile(
         ).execute()
 
         print(
-            "Profile created successfully."
+            f"Profile created for user: {user_id}"
         )
 
         return True
@@ -335,7 +227,7 @@ def create_user_profile(
     except Exception as e:
 
         print(
-            "PROFILE CREATION ERROR:",
+            "Error creating profile:",
             repr(e)
         )
 
@@ -355,7 +247,7 @@ def inject_globals():
 
 
 # ============================================================
-# HOME
+# HOME PAGE
 # ============================================================
 
 @app.route("/")
@@ -451,7 +343,10 @@ def signup():
 
     try:
 
-        client = create_supabase_client()
+        client = create_client(
+            SUPABASE_URL,
+            SUPABASE_PUBLISHABLE_KEY
+        )
 
         result = client.auth.sign_up(
             {
@@ -465,7 +360,7 @@ def signup():
             }
         )
 
-        if not result.user:
+        if result.user is None:
 
             flash(
                 "Signup failed. Could not create account.",
@@ -484,28 +379,30 @@ def signup():
                 result.session.access_token
             )
 
-            create_user_profile(
-                client,
-                user_id,
-                email,
-                full_name
-            )
+        create_user_profile(
+            client,
+            user_id,
+            email,
+            full_name
+        )
 
-            start_session(
-                result
-            )
-
-            flash(
-                "Welcome to MarvTec AI Solver!",
-                "success"
-            )
-
-        else:
+        if result.session is None:
 
             flash(
                 "Account created! Check your email to confirm your account, then log in.",
                 "info"
             )
+
+            return redirect(
+                url_for("home")
+            )
+
+        start_session(result)
+
+        flash(
+            "Welcome to MarvTec AI Solver!",
+            "success"
+        )
 
         return redirect(
             url_for("home")
@@ -519,7 +416,7 @@ def signup():
         )
 
         flash(
-            f"Sign up failed: {str(e)[:150]}",
+            f"Sign up failed: {str(e)[:100]}",
             "error"
         )
 
@@ -561,7 +458,10 @@ def login():
 
     try:
 
-        client = create_supabase_client()
+        client = create_client(
+            SUPABASE_URL,
+            SUPABASE_PUBLISHABLE_KEY
+        )
 
         result = client.auth.sign_in_with_password(
             {
@@ -581,9 +481,7 @@ def login():
                 url_for("home")
             )
 
-        start_session(
-            result
-        )
+        start_session(result)
 
         flash(
             "Login successful!",
@@ -602,7 +500,7 @@ def login():
         )
 
         flash(
-            f"Login failed: {str(e)[:150]}",
+            f"Login failed: {str(e)[:100]}",
             "error"
         )
 
@@ -632,6 +530,8 @@ def start_session(auth_result):
     session["email"] = (
         auth_result.user.email
     )
+
+    session.permanent = False
 
 
 # ============================================================
@@ -707,9 +607,7 @@ def post_problem():
 
     try:
 
-        client.table(
-            "problems"
-        ).insert(
+        client.table("problems").insert(
             {
                 "title": title,
                 "description": description,
@@ -731,7 +629,7 @@ def post_problem():
         )
 
         flash(
-            f"Could not post problem: {str(e)[:150]}",
+            f"Could not post problem: {str(e)[:100]}",
             "error"
         )
 
@@ -753,9 +651,7 @@ def problem_detail(problem_id):
 
     problem = None
     responses = []
-    profile = current_profile(
-        client
-    )
+    profile = current_profile(client)
     error = None
 
     try:
@@ -764,10 +660,7 @@ def problem_detail(problem_id):
             client
             .table("problems")
             .select("*")
-            .eq(
-                "id",
-                problem_id
-            )
+            .eq("id", problem_id)
             .single()
             .execute()
         )
@@ -787,9 +680,7 @@ def problem_detail(problem_id):
             .execute()
         )
 
-        responses = (
-            response_result.data or []
-        )
+        responses = response_result.data or []
 
     except Exception as e:
 
@@ -821,9 +712,7 @@ def reply(problem_id):
 
     client = get_client()
 
-    profile = current_profile(
-        client
-    )
+    profile = current_profile(client)
 
     if not profile:
 
@@ -839,9 +728,7 @@ def reply(problem_id):
             )
         )
 
-    if not profile.get(
-        "is_verified"
-    ):
+    if not profile.get("is_verified"):
 
         flash(
             "Only verified techs can reply.",
@@ -876,9 +763,7 @@ def reply(problem_id):
 
     try:
 
-        client.table(
-            "responses"
-        ).insert(
+        client.table("responses").insert(
             {
                 "problem_id": problem_id,
                 "tech_id": profile["id"],
@@ -899,7 +784,7 @@ def reply(problem_id):
         )
 
         flash(
-            f"Could not send reply: {str(e)[:150]}",
+            f"Could not send reply: {str(e)[:100]}",
             "error"
         )
 
@@ -920,9 +805,7 @@ def admin():
 
     client = get_client()
 
-    profile = current_profile(
-        client
-    )
+    profile = current_profile(client)
 
     if not profile:
 
@@ -955,14 +838,8 @@ def admin():
             client
             .table("profiles")
             .select("*")
-            .eq(
-                "role",
-                "tech"
-            )
-            .eq(
-                "is_verified",
-                False
-            )
+            .eq("role", "tech")
+            .eq("is_verified", False)
             .execute()
         )
 
@@ -996,9 +873,7 @@ def verify_tech(tech_id):
 
     client = get_client()
 
-    profile = current_profile(
-        client
-    )
+    profile = current_profile(client)
 
     if not profile:
 
@@ -1024,9 +899,7 @@ def verify_tech(tech_id):
 
     try:
 
-        client.table(
-            "profiles"
-        ).update(
+        client.table("profiles").update(
             {
                 "is_verified": True
             }
@@ -1048,7 +921,7 @@ def verify_tech(tech_id):
         )
 
         flash(
-            f"Could not verify tech: {str(e)[:150]}",
+            f"Could not verify tech: {str(e)[:100]}",
             "error"
         )
 
@@ -1097,7 +970,7 @@ def ask_ai():
     elif not GROQ_API_KEY:
 
         error = (
-            "GROQ_API_KEY is missing from Render environment variables."
+            "GROQ_API_KEY is missing from the environment variables."
         )
 
     # --------------------------------------------------------
@@ -1107,7 +980,8 @@ def ask_ai():
     elif not groq_client:
 
         error = (
-            "Groq client was not initialized."
+            "Groq client was not initialized. "
+            "Please check GROQ_API_KEY."
         )
 
     # --------------------------------------------------------
@@ -1118,50 +992,43 @@ def ask_ai():
 
         try:
 
-            system_message = (
+            ai_prompt = (
                 "You are MarvTec AI Solver, "
                 "a technical problem-solving assistant.\n\n"
 
-                "Give clear, practical and accurate solutions.\n"
-
-                "Break solutions into numbered steps.\n"
-
-                "Explain technical terms when necessary.\n"
-
-                "Do not invent facts.\n"
-
-                "If important information is missing, "
-                "clearly state what information is needed."
-            )
-
-            user_message = (
                 f"Technical category: {category}\n\n"
-                f"User's problem:\n{prompt}"
+
+                f"User's problem:\n{prompt}\n\n"
+
+                "Give a clear and practical solution. "
+                "Break the solution into numbered steps. "
+                "Explain technical terms when necessary. "
+                "Do not invent facts. "
+                "If more information is needed, "
+                "clearly state what information is missing."
             )
 
-            completion = (
-                groq_client
-                .chat
-                .completions
-                .create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": system_message
-                        },
-                        {
-                            "role": "user",
-                            "content": user_message
-                        }
-                    ],
-                    temperature=0.3,
-                    max_completion_tokens=1024
-                )
+            response = groq_client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are MarvTec AI Solver, "
+                            "a helpful technical problem-solving assistant."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": ai_prompt
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=2048
             )
 
             answer = (
-                completion
+                response
                 .choices[0]
                 .message
                 .content
@@ -1181,9 +1048,35 @@ def ask_ai():
                 repr(e)
             )
 
-            error = (
-                f"AI request failed: {str(e)[:200]}"
-            )
+            error_text = str(e)
+
+            if "401" in error_text:
+
+                error = (
+                    "Groq API key is invalid. "
+                    "Check GROQ_API_KEY in Render Environment Variables."
+                )
+
+            elif "429" in error_text:
+
+                error = (
+                    "Groq request limit reached. "
+                    "Please wait a little and try again."
+                )
+
+            elif "503" in error_text:
+
+                error = (
+                    "Groq is temporarily unavailable. "
+                    "Please try again shortly."
+                )
+
+            else:
+
+                error = (
+                    f"AI request failed: "
+                    f"{error_text[:150]}"
+                )
 
     # ========================================================
     # LOAD PROBLEMS
@@ -1207,9 +1100,7 @@ def ask_ai():
             .execute()
         )
 
-        problems = (
-            result.data or []
-        )
+        problems = result.data or []
 
     except Exception as e:
 
