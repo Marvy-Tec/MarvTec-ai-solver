@@ -1,5 +1,6 @@
 import os
-import time
+import base64
+import json
 
 from flask import (
     Flask,
@@ -13,28 +14,23 @@ from flask import (
 
 from supabase import create_client, Client
 from dotenv import load_dotenv
-from google import genai
+from groq import Groq
 
 
 # ============================================================
-# LOAD .ENV
+# LOAD ENVIRONMENT VARIABLES
 # ============================================================
 
 load_dotenv()
 
-
-# ============================================================
-# ENVIRONMENT VARIABLES
-# ============================================================
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
 
 
 # ============================================================
-# CHECK REQUIRED ENVIRONMENT VARIABLES
+# CHECK ENVIRONMENT VARIABLES
 # ============================================================
 
 if not SUPABASE_URL:
@@ -52,6 +48,11 @@ if not FLASK_SECRET_KEY:
         "FLASK_SECRET_KEY is missing from your environment variables."
     )
 
+if not GROQ_API_KEY:
+    print(
+        "WARNING: GROQ_API_KEY is missing from environment variables."
+    )
+
 
 # ============================================================
 # FLASK APP
@@ -62,31 +63,30 @@ app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 
 app.config["SESSION_PERMANENT"] = False
-app.config["SESSION_TYPE"] = "filesystem"
 
 
 # ============================================================
-# GEMINI
+# GROQ CLIENT
 # ============================================================
 
-gemini_client = None
+groq_client = None
 
-if GEMINI_API_KEY:
+if GROQ_API_KEY:
 
     try:
 
-        gemini_client = genai.Client(
-            api_key=GEMINI_API_KEY
+        groq_client = Groq(
+            api_key=GROQ_API_KEY
         )
 
         print(
-            "Gemini client initialized successfully."
+            "Groq client initialized successfully."
         )
 
     except Exception as e:
 
         print(
-            "WARNING: Could not initialize Gemini client:",
+            "GROQ INITIALIZATION ERROR:",
             repr(e)
         )
 
@@ -95,72 +95,150 @@ if GEMINI_API_KEY:
 # SUPABASE CLIENT
 # ============================================================
 
-def get_client() -> Client:
+def create_supabase_client():
 
-    client = create_client(
+    return create_client(
         SUPABASE_URL,
         SUPABASE_PUBLISHABLE_KEY
     )
 
-    access_token = session.get(
-        "access_token"
-    )
+
+# ============================================================
+# CHECK JWT EXPIRATION
+# ============================================================
+
+def token_is_expired(token):
+
+    try:
+
+        parts = token.split(".")
+
+        if len(parts) != 3:
+            return True
+
+        payload = parts[1]
+
+        payload += "=" * (
+            4 - len(payload) % 4
+        )
+
+        decoded = base64.urlsafe_b64decode(
+            payload
+        )
+
+        data = json.loads(
+            decoded.decode("utf-8")
+        )
+
+        exp = data.get("exp")
+
+        if not exp:
+            return True
+
+        import time
+
+        return time.time() >= exp
+
+    except Exception:
+
+        return True
+
+
+# ============================================================
+# REFRESH SUPABASE SESSION
+# ============================================================
+
+def refresh_supabase_session():
 
     refresh_token = session.get(
         "refresh_token"
     )
 
-    # --------------------------------------------------------
-    # Restore / refresh Supabase session
-    # --------------------------------------------------------
+    if not refresh_token:
 
-    if access_token and refresh_token:
+        return False
 
-        try:
+    try:
 
-            auth_response = client.auth.set_session(
-                access_token,
-                refresh_token
-            )
+        client = create_supabase_client()
 
-            if auth_response.session:
+        result = client.auth.refresh_session(
+            refresh_token
+        )
 
-                new_access_token = (
-                    auth_response.session.access_token
-                )
+        if not result.session:
 
-                new_refresh_token = (
-                    auth_response.session.refresh_token
-                )
+            return False
 
-                session["access_token"] = (
-                    new_access_token
-                )
+        session["access_token"] = (
+            result.session.access_token
+        )
 
-                session["refresh_token"] = (
-                    new_refresh_token
-                )
+        session["refresh_token"] = (
+            result.session.refresh_token
+        )
 
-                client.postgrest.auth(
-                    new_access_token
-                )
+        session["user_id"] = (
+            result.user.id
+        )
 
-        except Exception as e:
+        session["email"] = (
+            result.user.email
+        )
+
+        print(
+            "Supabase session refreshed successfully."
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "SUPABASE REFRESH ERROR:",
+            repr(e)
+        )
+
+        session.clear()
+
+        return False
+
+
+# ============================================================
+# SUPABASE CLIENT WITH CURRENT USER TOKEN
+# ============================================================
+
+def get_client() -> Client:
+
+    client = create_supabase_client()
+
+    token = session.get(
+        "access_token"
+    )
+
+    if token:
+
+        if token_is_expired(token):
 
             print(
-                "SUPABASE SESSION ERROR:",
-                repr(e)
+                "Supabase access token expired. Refreshing..."
             )
 
-            # Session can no longer be used.
-            # Force a fresh login.
-            session.clear()
+            if refresh_supabase_session():
 
-    elif access_token:
+                token = session.get(
+                    "access_token"
+                )
 
-        client.postgrest.auth(
-            access_token
-        )
+            else:
+
+                token = None
+
+        if token:
+
+            client.postgrest.auth(
+                token
+            )
 
     return client
 
@@ -176,7 +254,6 @@ def current_user():
     )
 
     if not user_id:
-
         return None
 
     return {
@@ -189,16 +266,13 @@ def current_user():
 # CURRENT PROFILE
 # ============================================================
 
-def current_profile(
-    client: Client
-):
+def current_profile(client: Client):
 
     user_id = session.get(
         "user_id"
     )
 
     if not user_id:
-
         return None
 
     try:
@@ -207,7 +281,10 @@ def current_profile(
             client
             .table("profiles")
             .select("*")
-            .eq("id", user_id)
+            .eq(
+                "id",
+                user_id
+            )
             .single()
             .execute()
         )
@@ -217,7 +294,7 @@ def current_profile(
     except Exception as e:
 
         print(
-            "Error fetching profile:",
+            "PROFILE ERROR:",
             repr(e)
         )
 
@@ -250,7 +327,7 @@ def create_user_profile(
         ).execute()
 
         print(
-            f"Profile created for user: {user_id}"
+            "Profile created successfully."
         )
 
         return True
@@ -258,7 +335,7 @@ def create_user_profile(
     except Exception as e:
 
         print(
-            "Error creating profile:",
+            "PROFILE CREATION ERROR:",
             repr(e)
         )
 
@@ -278,7 +355,7 @@ def inject_globals():
 
 
 # ============================================================
-# HOME PAGE
+# HOME
 # ============================================================
 
 @app.route("/")
@@ -374,10 +451,7 @@ def signup():
 
     try:
 
-        client = create_client(
-            SUPABASE_URL,
-            SUPABASE_PUBLISHABLE_KEY
-        )
+        client = create_supabase_client()
 
         result = client.auth.sign_up(
             {
@@ -391,7 +465,7 @@ def signup():
             }
         )
 
-        if result.user is None:
+        if not result.user:
 
             flash(
                 "Signup failed. Could not create account.",
@@ -410,36 +484,28 @@ def signup():
                 result.session.access_token
             )
 
-        if not create_user_profile(
-            client,
-            user_id,
-            email,
-            full_name
-        ):
-
-            print(
-                f"Warning: Profile creation failed for {user_id}"
+            create_user_profile(
+                client,
+                user_id,
+                email,
+                full_name
             )
 
-        if result.session is None:
+            start_session(
+                result
+            )
+
+            flash(
+                "Welcome to MarvTec AI Solver!",
+                "success"
+            )
+
+        else:
 
             flash(
                 "Account created! Check your email to confirm your account, then log in.",
                 "info"
             )
-
-            return redirect(
-                url_for("home")
-            )
-
-        start_session(
-            result
-        )
-
-        flash(
-            "Welcome to MarvTec AI Solver!",
-            "success"
-        )
 
         return redirect(
             url_for("home")
@@ -453,7 +519,7 @@ def signup():
         )
 
         flash(
-            f"Sign up failed: {str(e)[:100]}",
+            f"Sign up failed: {str(e)[:150]}",
             "error"
         )
 
@@ -495,10 +561,7 @@ def login():
 
     try:
 
-        client = create_client(
-            SUPABASE_URL,
-            SUPABASE_PUBLISHABLE_KEY
-        )
+        client = create_supabase_client()
 
         result = client.auth.sign_in_with_password(
             {
@@ -539,7 +602,7 @@ def login():
         )
 
         flash(
-            f"Login failed: {str(e)[:100]}",
+            f"Login failed: {str(e)[:150]}",
             "error"
         )
 
@@ -552,9 +615,7 @@ def login():
 # START SESSION
 # ============================================================
 
-def start_session(
-    auth_result
-):
+def start_session(auth_result):
 
     session["access_token"] = (
         auth_result.session.access_token
@@ -571,8 +632,6 @@ def start_session(
     session["email"] = (
         auth_result.user.email
     )
-
-    session.permanent = False
 
 
 # ============================================================
@@ -672,7 +731,7 @@ def post_problem():
         )
 
         flash(
-            f"Could not post problem: {str(e)[:100]}",
+            f"Could not post problem: {str(e)[:150]}",
             "error"
         )
 
@@ -688,9 +747,7 @@ def post_problem():
 @app.route(
     "/problem/<problem_id>"
 )
-def problem_detail(
-    problem_id
-):
+def problem_detail(problem_id):
 
     client = get_client()
 
@@ -760,9 +817,7 @@ def problem_detail(
     "/problem/<problem_id>/reply",
     methods=["POST"]
 )
-def reply(
-    problem_id
-):
+def reply(problem_id):
 
     client = get_client()
 
@@ -844,7 +899,7 @@ def reply(
         )
 
         flash(
-            f"Could not send reply: {str(e)[:100]}",
+            f"Could not send reply: {str(e)[:150]}",
             "error"
         )
 
@@ -880,9 +935,7 @@ def admin():
             url_for("home")
         )
 
-    if profile.get(
-        "role"
-    ) != "admin":
+    if profile.get("role") != "admin":
 
         flash(
             "Admins only.",
@@ -939,9 +992,7 @@ def admin():
     "/admin/verify/<tech_id>",
     methods=["POST"]
 )
-def verify_tech(
-    tech_id
-):
+def verify_tech(tech_id):
 
     client = get_client()
 
@@ -960,9 +1011,7 @@ def verify_tech(
             url_for("home")
         )
 
-    if profile.get(
-        "role"
-    ) != "admin":
+    if profile.get("role") != "admin":
 
         flash(
             "Admins only.",
@@ -999,7 +1048,7 @@ def verify_tech(
         )
 
         flash(
-            f"Could not verify tech: {str(e)[:100]}",
+            f"Could not verify tech: {str(e)[:150]}",
             "error"
         )
 
@@ -1009,7 +1058,7 @@ def verify_tech(
 
 
 # ============================================================
-# MARVTEC AI SOLVER
+# MARVTEC AI SOLVER - GROQ
 # ============================================================
 
 @app.route(
@@ -1042,120 +1091,81 @@ def ask_ai():
         )
 
     # --------------------------------------------------------
-    # CHECK API KEY
+    # CHECK GROQ KEY
     # --------------------------------------------------------
 
-    elif not GEMINI_API_KEY:
+    elif not GROQ_API_KEY:
 
         error = (
-            "GEMINI_API_KEY is missing from the environment variables."
+            "GROQ_API_KEY is missing from Render environment variables."
         )
 
     # --------------------------------------------------------
-    # CHECK CLIENT
+    # CHECK GROQ CLIENT
     # --------------------------------------------------------
 
-    elif not gemini_client:
+    elif not groq_client:
 
         error = (
-            "AI client was not initialized. "
-            "Please check GEMINI_API_KEY."
+            "Groq client was not initialized."
         )
 
     # --------------------------------------------------------
-    # ASK GEMINI
+    # ASK GROQ
     # --------------------------------------------------------
 
     else:
 
         try:
 
-            ai_prompt = (
+            system_message = (
                 "You are MarvTec AI Solver, "
                 "a technical problem-solving assistant.\n\n"
 
-                f"Technical category: {category}\n\n"
+                "Give clear, practical and accurate solutions.\n"
 
-                f"User's problem:\n{prompt}\n\n"
+                "Break solutions into numbered steps.\n"
 
-                "Give a clear and practical solution. "
-                "Break the solution into numbered steps. "
-                "Explain technical terms when necessary. "
-                "Do not invent facts. "
-                "If more information is needed, "
-                "clearly state what information is missing."
+                "Explain technical terms when necessary.\n"
+
+                "Do not invent facts.\n"
+
+                "If important information is missing, "
+                "clearly state what information is needed."
             )
 
-            response = None
+            user_message = (
+                f"Technical category: {category}\n\n"
+                f"User's problem:\n{prompt}"
+            )
 
-            max_attempts = 3
+            completion = (
+                groq_client
+                .chat
+                .completions
+                .create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_message
+                        },
+                        {
+                            "role": "user",
+                            "content": user_message
+                        }
+                    ],
+                    temperature=0.3,
+                    max_completion_tokens=1024
+                )
+            )
 
-            for attempt in range(
-                1,
-                max_attempts + 1
-            ):
-
-                try:
-
-                    print(
-                        f"GEMINI REQUEST ATTEMPT {attempt}"
-                    )
-
-                    response = (
-                        gemini_client
-                        .models
-                        .generate_content(
-                            model="gemini-3.7-flash",
-                            contents=ai_prompt
-                        )
-                    )
-
-                    break
-
-                except Exception as gemini_error:
-
-                    error_text = str(
-                        gemini_error
-                    ).lower()
-
-                    print(
-                        f"GEMINI ATTEMPT {attempt} ERROR:",
-                        repr(gemini_error)
-                    )
-
-                    temporary_error = (
-                        "503" in error_text
-                        or "unavailable" in error_text
-                        or "high demand" in error_text
-                        or "429" in error_text
-                        or "rate limit" in error_text
-                    )
-
-                    if (
-                        temporary_error
-                        and attempt < max_attempts
-                    ):
-
-                        wait_time = (
-                            5 * (2 ** (attempt - 1))
-                        )
-
-                        print(
-                            f"Gemini temporarily unavailable. "
-                            f"Retrying in {wait_time} seconds..."
-                        )
-
-                        time.sleep(
-                            wait_time
-                        )
-
-                        continue
-
-                    raise
-
-            if response:
-
-                answer = response.text
+            answer = (
+                completion
+                .choices[0]
+                .message
+                .content
+            )
 
             if not answer:
 
@@ -1167,40 +1177,13 @@ def ask_ai():
         except Exception as e:
 
             print(
-                "GEMINI ERROR:",
+                "GROQ ERROR:",
                 repr(e)
             )
 
-            error_text = str(e)
-
-            if "404" in error_text:
-
-                error = (
-                    "The Gemini model was not found. "
-                    "Please make sure Render is running "
-                    "the latest version of appy.py."
-                )
-
-            elif "503" in error_text:
-
-                error = (
-                    "Gemini is temporarily busy. "
-                    "Please try again in a few moments."
-                )
-
-            elif "429" in error_text:
-
-                error = (
-                    "Gemini request limit reached. "
-                    "Please wait a little and try again."
-                )
-
-            else:
-
-                error = (
-                    f"AI request failed: "
-                    f"{error_text[:150]}"
-                )
+            error = (
+                f"AI request failed: {str(e)[:200]}"
+            )
 
     # ========================================================
     # LOAD PROBLEMS
