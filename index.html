@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="hero">
+  <h2>Got a Tech Problem?</h2>
+  <p>Marvtec AI Tech Solver + Verified Experts in Port Harcourt</p>
+</section>
+
+<section class="section">
+  <h3>Marvtec AI Tech Solver</h3>
+  <form method="POST" action="{{ url_for('ask_ai') }}">
+    <textarea name="prompt" placeholder="e.g. My website payment is not working...">{{ ai_prompt or '' }}</textarea>
+    <select name="category">
+      <option {{ 'selected' if ai_prompt }}>Software</option>
+      <option>Networking</option>
+      <option>AI</option>
+    </select>
+    <button type="submit" class="btn btn-primary btn-block">Get Instant Solution</button>
+  </form>
+  {% if ai_answer %}
+    <div class="ai-answer">{{ ai_answer }}</div>
+  {% elif ai_error %}
+    <div class="ai-error">{{ ai_error }}</div>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h3>Post a Problem</h3>
+  <form method="POST" action="{{ url_for('post_problem') }}">
+    <input name="title" placeholder="Title">
+    <textarea name="description" placeholder="Describe your problem"></textarea>
+    <select name="category">
+      <option>Software</option>
+      <option>Networking</option>
+      <option>AI</option>
+    </select>
+    <button type="submit" class="btn btn-dark btn-block">Post Problem</button>
+  </form>
+</section>
+
+<section class="section-wide">
+  <h3>Open Problems</h3>
+  {% if error %}
+    <p style="color:#dc2626;font-size:0.875rem;">{{ error }}</p>
+  {% endif %}
+  {% if not problems %}
+    <p style="color:#64748b;">No problems posted yet.</p>
+  {% endif %}
+  {% for p in problems %}
+    <a href="{{ url_for('problem_detail', problem_id=p.id) }}" class="problem-card">
+      <h4>{{ p.title }}</h4>
+      <p>{{ p.category }}</p>
+    </a>
+  {% endfor %}
+</section>
+
+{% endblock %}

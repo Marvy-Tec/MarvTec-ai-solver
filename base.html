@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marvtec — AI Tech Solver</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <nav class="nav">
+    <a href="{{ url_for('home') }}" class="brand">Marvtec</a>
+    <div class="nav-actions">
+      {% if user %}
+        <a href="{{ url_for('admin') }}" class="btn btn-muted">Admin</a>
+        <span style="font-size:0.875rem;color:#64748b;">{{ user.email }}</span>
+        <form method="POST" action="{{ url_for('logout') }}" style="margin:0;">
+          <button class="btn btn-muted">Logout</button>
+        </form>
+      {% else %}
+        <button onclick="document.getElementById('authModal').classList.remove('hidden')" class="btn btn-primary">Login / Sign up</button>
+      {% endif %}
+    </div>
+  </nav>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-wrap">
+        {% for category, msg in messages %}
+          <div class="flash {{ 'flash-error' if category == 'error' else 'flash-info' }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <div style="flex:1;">
+    {% block content %}{% endblock %}
+  </div>
+
+  <footer class="footer">
+    <h4>Marvtec</h4>
+    <p>Daily Problem Solving. Powered by AI + Community.</p>
+  </footer>
+
+  <!-- AUTH MODAL -->
+  <div id="authModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="authTitle">Log in</h3>
+        <button onclick="document.getElementById('authModal').classList.add('hidden')" class="modal-close">&times;</button>
+      </div>
+
+      <form method="POST" action="{{ url_for('login') }}" id="signinForm">
+        <input name="email" type="email" placeholder="Email" required>
+        <input name="password" type="password" placeholder="Password" required>
+        <button type="submit" class="btn btn-primary btn-block">Log in</button>
+      </form>
+
+      <form method="POST" action="{{ url_for('signup') }}" id="signupForm" class="hidden">
+        <input name="full_name" placeholder="Full name">
+        <input name="email" type="email" placeholder="Email" required>
+        <input name="password" type="password" placeholder="Password (min 6 chars)" required minlength="6">
+        <button type="submit" class="btn btn-primary btn-block">Create account</button>
+      </form>
+
+      <p class="modal-footer">
+        <span id="toSignup">No account? <button type="button" onclick="toggleAuth('signup')" class="link-btn">Sign up</button></span>
+        <span id="toSignin" class="hidden">Already have an account? <button type="button" onclick="toggleAuth('signin')" class="link-btn">Log in</button></span>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    function toggleAuth(mode) {
+      const isSignup = mode === 'signup';
+      document.getElementById('signinForm').classList.toggle('hidden', isSignup);
+      document.getElementById('signupForm').classList.toggle('hidden', !isSignup);
+      document.getElementById('toSignup').classList.toggle('hidden', isSignup);
+      document.getElementById('toSignin').classList.toggle('hidden', !isSignup);
+      document.getElementById('authTitle').textContent = isSignup ? 'Sign up' : 'Log in';
+    }
+  </script>
+</body>
+</html>

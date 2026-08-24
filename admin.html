@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-wide">
+  <a href="{{ url_for('home') }}" style="color:#2563eb;display:inline-block;margin-bottom:1rem;">&larr; Back</a>
+  <h1 style="font-size:1.875rem;font-weight:700;margin-bottom:1rem;">Admin: Verify Techs</h1>
+
+  {% if error %}
+    <p style="color:#dc2626;font-size:0.875rem;">{{ error }}</p>
+  {% endif %}
+  {% if not techs %}
+    <p>No pending techs</p>
+  {% endif %}
+  {% for t in techs %}
+    <div class="admin-row">
+      <p style="font-weight:700;margin:0;">{{ t.full_name }}</p>
+      <form method="POST" action="{{ url_for('verify_tech', tech_id=t.id) }}" style="margin:0;">
+        <button type="submit" class="btn btn-green">Verify</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section">
+  <a href="{{ url_for('home') }}" style="color:#2563eb;display:inline-block;margin-bottom:1rem;">&larr; Back to Problems</a>
+
+  {% if error %}
+    <p style="color:#dc2626;font-size:0.875rem;">{{ error }}</p>
+  {% elif problem %}
+    <h1 style="font-size:1.875rem;font-weight:700;">{{ problem.title }}</h1>
+    <p style="margin-top:0.5rem;">{{ problem.description }}</p>
+    <p style="font-size:0.875rem;color:#2563eb;margin-top:0.25rem;">{{ problem.category }}</p>
+
+    <h3 style="font-size:1.25rem;font-weight:700;margin-top:2rem;margin-bottom:0.5rem;">Responses from Verified Techs</h3>
+    {% if not responses %}
+      <p style="color:#64748b;font-size:0.875rem;">No responses yet.</p>
+    {% endif %}
+    {% for r in responses %}
+      <div class="response-card">
+        <p style="font-weight:600;margin:0 0 0.25rem;">
+          {{ r.profiles.full_name if r.profiles else 'Unknown' }}
+          <span class="badge">Verified</span>
+        </p>
+        <p style="margin:0;">{{ r.message }}</p>
+      </div>
+    {% endfor %}
+
+    {% if profile and profile.is_verified %}
+      <form method="POST" action="{{ url_for('reply', problem_id=problem.id) }}" style="margin-top:1rem;">
+        <textarea name="message" placeholder="Your solution..." required></textarea>
+        <button type="submit" class="btn btn-primary">Send Reply</button>
+      </form>
+    {% else %}
+      <p style="margin-top:1rem;font-size:0.875rem;color:#64748b;">Only verified techs can reply</p>
+    {% endif %}
+  {% else %}
+    <p style="color:#64748b;">Problem not found.</p>
+  {% endif %}
+</div>
+{% endblock %}
