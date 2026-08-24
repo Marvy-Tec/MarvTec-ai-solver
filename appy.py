@@ -1,4 +1,5 @@
 import os
+import time
 
 from flask import (
     Flask,
@@ -1008,38 +1009,66 @@ def ask_ai():
                 "clearly state what information is missing."
             )
 
-            response = groq_client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are MarvTec AI Solver, "
-                            "a helpful technical problem-solving assistant."
+            # Retry logic with exponential backoff
+            max_retries = 3
+            retry_count = 0
+            response = None
+
+            while retry_count < max_retries:
+                try:
+                    response = groq_client.chat.completions.create(
+                        model="openai/gpt-oss-20b",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are MarvTec AI Solver, "
+                                    "a helpful technical problem-solving assistant."
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": ai_prompt
+                            }
+                        ],
+                        temperature=0.3,
+                        max_tokens=1024
+                    )
+                    break  # Success, exit retry loop
+
+                except Exception as retry_error:
+                    error_text = str(retry_error)
+                    retry_count += 1
+
+                    # Handle rate limit with backoff
+                    if "429" in error_text and retry_count < max_retries:
+                        wait_time = 2 ** retry_count  # Exponential backoff: 2, 4, 8 seconds
+                        print(
+                            f"Rate limited. Retrying in {wait_time}s "
+                            f"(attempt {retry_count}/{max_retries})"
                         )
-                    },
-                    {
-                        "role": "user",
-                        "content": ai_prompt
-                    }
-                ],
-                temperature=0.3,
-                max_tokens=2048
-            )
+                        time.sleep(wait_time)
+                    else:
+                        raise retry_error
 
-            answer = (
-                response
-                .choices[0]
-                .message
-                .content
-            )
-
-            if not answer:
-
+            if response is None:
                 error = (
-                    "AI did not return an answer. "
+                    "Failed to get response from AI after retries. "
                     "Please try again."
                 )
+            else:
+                answer = (
+                    response
+                    .choices[0]
+                    .message
+                    .content
+                )
+
+                if not answer:
+                    error = (
+                        "AI did not return an answer. "
+                        "Please try again."
+                    )
 
         except Exception as e:
 
@@ -1060,8 +1089,8 @@ def ask_ai():
             elif "429" in error_text:
 
                 error = (
-                    "Groq request limit reached. "
-                    "Please wait a little and try again."
+                    "Rate limit reached. The API is busy. "
+                    "Please wait 30 seconds and try again."
                 )
 
             elif "503" in error_text:
